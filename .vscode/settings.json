@@ -1,0 +1,4 @@
+{
+	"nixEnvSelector.nixFile": "${workspaceRoot}/shell.nix",
+	"terminal.integrated.defaultProfile.linux": "zsh with nix-shell",
+}
