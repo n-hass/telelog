@@ -1,3 +1,4 @@
+use chrono::{DateTime,Local};
 use systemd::{journal, Journal};
 
 pub fn open_journal_tail() -> Journal {
@@ -9,4 +10,12 @@ pub fn open_journal_tail() -> Journal {
 	j.wait(None).expect("Failed to wait for last entry");
 	j.previous().expect("Failed to position cursor for following tail");
 	j
+}
+
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+	pub timestamp: DateTime<Local>,
+	pub identifier: String,
+	pub message: String,
+	pub priority: u8,
 }

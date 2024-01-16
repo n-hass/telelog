@@ -3,12 +3,20 @@ use lazy_static::lazy_static;
 
 use systemd::journal as sysjournal;
 
+use crate::journal::LogEntry;
+use crate::filter::filter_log_entry;
+
+use regex::Regex;
 lazy_static!(
-	// system timezone
-	static ref LOCAL_TZ_OFFSET: i64 = chrono::offset::Local::now().offset().local_minus_utc() as i64;
+	static ref RE: Regex = Regex::new("\x1b\\[[0-9;]*m").unwrap();
 );
 
-pub fn print_a_message(entry: Result<Option<sysjournal::JournalRecord>,systemd::Error>) {
+// do the bare minimum to clean the message - remove ANSI tty colouring and trailing newlines
+fn clean_message(message: &str) -> String {
+	RE.replace_all(message, "").trim_end_matches('\n').to_string()
+}
+
+fn parse_message(entry: Result<Option<sysjournal::JournalRecord>,systemd::Error>) -> Option<LogEntry> {
 	match entry {
 		Ok(Some(entry)) => 
 		{
@@ -22,35 +30,54 @@ pub fn print_a_message(entry: Result<Option<sysjournal::JournalRecord>,systemd::
 						LocalResult::None => panic!("Invalid timestamp"),
 						LocalResult::Ambiguous(_, _) => panic!("Ambiguous timestamp"),
 					};
-					let t = t.format("%b %d %H:%M:%S");
-					t.to_string()
+					t
 				},
 				None => {
 					// just make a timestamp from the current time
-					chrono::offset::Local::now().format("%b %d %H:%M:%S").to_string()
+					chrono::offset::Local::now()
 				},
 			};
 
 			let identifier = match entry.get("SYSLOG_IDENTIFIER") {
-				Some(i) => i,
-				None => "unknown",
+				Some(i) => i.to_owned(),
+				None => "unknown".to_owned(),
 			};
 
 			let message = match entry.get("MESSAGE") {
-				Some(m) => m,
-				None => "unknown",
+				Some(m) => clean_message(m),
+				None => "unknown".to_owned(),
 			};
 
-			println!("[{}] {}: {}", timestamp, identifier, message);
+			let priority = match entry.get("PRIORITY") {
+				Some(p) => p.parse::<u8>().unwrap(),
+				None => 7,
+			};
+
+			return Some(LogEntry {
+				timestamp: timestamp,
+				identifier: identifier,
+				message: message,
+				priority: priority,
+			});
 		},
 		Ok(None) => {
-			println!("No entry");
-			return;
+			return None;
 		},
 		Err(e) => {
-			println!("Error: {}", e);
-			return;
+			println!("[parser] Error: {}", e);
+			return None;
 		},
 	};
-		
+}
+
+pub fn print_a_message(entry: Result<Option<sysjournal::JournalRecord>,systemd::Error>) {
+	match parse_message(entry) {
+		Some(entry) => {
+			if filter_log_entry(&entry) {
+				return
+			}
+			println!("[{}] {}: {}", entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message);
+		},
+		None => {},
+	}
 }
