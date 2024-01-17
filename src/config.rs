@@ -1,5 +1,8 @@
+use std::path::PathBuf;
 use config::Config;
 use serde::Deserialize;
+
+use clap::{arg, command, value_parser, ArgAction, Command};
 
 #[derive(Debug, Deserialize)]
 pub struct AppSettings {
@@ -47,6 +50,7 @@ pub struct Filter {
 	pub action: Option<String>,
 }
 
+
 fn get_environment_variable(name: &str) -> Option<String> {
 	match std::env::var(name) {
 		Ok(value) => Some(value),
@@ -54,9 +58,22 @@ fn get_environment_variable(name: &str) -> Option<String> {
 	}
 }
 
-pub fn read_config() -> Result<AppSettings, config::ConfigError> {
+pub fn parse_cli_args() -> clap::ArgMatches {
+	return command!()
+		.arg(
+				arg!(
+						-c --config <FILE> "Sets a custom config file"
+				)
+				// We don't have syntax yet for optional options, so manually calling `required`
+				.required(false)
+				.value_parser(value_parser!(PathBuf)),
+		)
+		.get_matches()
+}
+
+pub fn read_config(filepath: &str) -> Result<AppSettings, config::ConfigError> {
 	let builder = Config::builder()
-		.add_source(config::File::with_name("/etc/telelog.toml"));
+		.add_source(config::File::with_name(filepath));
 
 	match builder.build() {
 		Ok(settings) => {

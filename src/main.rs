@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use systemd::journal::Journal as SysJournal;
 use systemd::journal as sysjournal;
 
@@ -5,7 +7,7 @@ mod journal;
 use journal::open_journal_tail;
 
 mod config;
-use config::{read_config, AppSettings};
+use config::{read_config, AppSettings, parse_cli_args};
 
 mod parser;
 use parser::parse_message;
@@ -59,7 +61,15 @@ async fn init(settings: AppSettings) -> SysJournal {
 #[tokio::main]
 async fn main() {
 
-	let settings = match read_config() {
+	let args = parse_cli_args();
+
+	let mut config_path = "/etc/telelog.toml";
+	match args.get_one::<PathBuf>("config") {
+		Some(path) => config_path = path.to_str().unwrap(),
+		None => println!("[main] Config file not specified, using '/etc/telelog.toml'"),
+	}
+
+	let settings = match read_config(config_path) {
 		Ok(settings) => settings,
 		Err(e) => {
 			println!("[main] Error reading config: {}", e);
