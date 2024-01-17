@@ -22,7 +22,7 @@ pub async fn send_log_entry(entry: LogEntry) {
 	buffer.push(entry.clone());
 
 	// if this is a critical entry, flush the buffer immediately
-	if entry.priority <= 3 {
+	if entry.priority <= 2 {
 		drop(buffer); // release the lock
 		tokio::spawn(async move {
 			flush_log_buffer().await;
@@ -50,14 +50,40 @@ pub async fn send_log_entry(entry: LogEntry) {
 	}
 }
 
+fn colour_translate(priority: u8) -> String {
+	// match priority {
+	// 	0 => "#FF3333".to_owned(),
+	// 	1 => "#FF6600".to_owned(),
+	// 	2 => "#800080".to_owned(),
+	// 	3 => "#B22222".to_owned(),
+	// 	4 => "#FFD700".to_owned(),
+	// 	5 => "#87CEEB".to_owned(),
+	// 	6 => "#4169E1".to_owned(),
+	// 	7 => "#CDD1D3".to_owned(),
+	// 	_ => "#000000".to_owned(),
+	// }
+	match priority {
+		0 => "☢️".to_owned(),
+		1 => "‼️".to_owned(),
+		2 => "🟣".to_owned(),
+		3 => "⭕️".to_owned(),
+		4 => "🟡".to_owned(),
+		5 => "🔵".to_owned(),
+		6 => "⚫️".to_owned(),
+		7 => "⚪️".to_owned(),
+		_ => "⚪️".to_owned(),
+	}
+}
+
 async fn flush_log_buffer() {
 	let mut buffer = LOG_BUFFER.lock().await;
 	// parse the buffer to form the telegram message
-	let mut message = String::from("```\n");
+	let mut message = String::from("<code>\n");
 	for entry in buffer.borrow_mut().iter() {
-		message.push_str(&format!("[{}] {}: {}\n", entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message));
+		let colour = colour_translate(entry.priority);
+		message.push_str(&format!("{}[{}] {}: {}\n", colour, entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message));
 	}
-	message.push_str("```");
+	message.push_str("</code>");
 	buffer.clear();
 	drop(buffer); // release the lock
 
@@ -69,7 +95,7 @@ async fn flush_log_buffer() {
 
 	let client = reqwest::Client::new();
 	match client.post(&format!("https://api.telegram.org/bot{}/sendMessage", api_key))
-		.form(&[("chat_id", chat_id), ("text", message), ("parse_mode", "Markdown".to_string())])
+		.form(&[("chat_id", chat_id), ("text", message), ("parse_mode", "HTML".to_string())])
 		.send()
 		.await {
 		Ok(response) => {
