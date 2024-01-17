@@ -4,11 +4,11 @@ use systemd::{journal, Journal};
 pub fn open_journal_tail() -> Journal {
 	let mut j = journal::OpenOptions::default().open().expect("Could not open journal");
 	
-	j.seek_tail().expect("Failed to seek to tail");
+	j.seek_tail().expect("[open_journal] Failed to seek to tail");
 
-	println!("Seeked to tail, waiting for next entry ...\n");
-	j.wait(None).expect("Failed to wait for last entry");
-	j.previous().expect("Failed to position cursor for following tail");
+	println!("[open_journal] Seeked to tail ...\n");
+	j.wait(None).expect("[open_journal] Failed to wait for last entry");
+	j.previous().expect("[open_journal] Failed to position cursor for following tail");
 	j
 }
 
@@ -29,7 +29,7 @@ impl LogEntry {
 			"message" => Ok(self.message.clone()),
 			"MESSAGE" => Ok(self.message.clone()),
 			"priority" => Ok(self.priority.to_string()),
-			_ => Err(format!("Field {} not found", field_string)),
+			_ => Err(format!("[LogEntry get] Field {} not found", field_string)),
 		}
 	}
 }
