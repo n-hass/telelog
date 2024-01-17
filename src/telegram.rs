@@ -80,8 +80,8 @@ async fn flush_log_buffer() {
 	// parse the buffer to form the telegram message
 	let mut message = String::from("<code>\n");
 	for entry in buffer.borrow_mut().iter() {
-		let colour = colour_translate(entry.priority);
-		message.push_str(&format!("{}[{}] {}: {}\n", colour, entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message));
+		let colour_symbol = colour_translate(entry.priority);
+		message.push_str(&format!("{}[{}] {}: {}\n", colour_symbol, entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message));
 	}
 	message.push_str("</code>");
 	buffer.clear();
@@ -102,7 +102,7 @@ async fn flush_log_buffer() {
 			if response.status().is_success() {
 				return
 			}
-			println!("[telegram] API Error: {}", response.status());
+			println!("[telegram] API response {}: {:?}", response.status(), response.text().await);
 		},
 		Err(e) => {
 			println!("[telegram] Failed: {}", e);
