@@ -85,7 +85,6 @@ pub fn read_config(filepath: &str) -> Result<AppSettings, config::ConfigError> {
 					match get_environment_variable("TELEGRAM_API_KEY") {
 						Some(api_key) => {
 							settings.telegram.api_key = Some(api_key);
-							return Ok(settings)
 						},
 						None => {
 							return Err(config::ConfigError::Message("[config] No API key set in file as telegram.api_key, and no TELEGRAM_API_KEY environment variable".to_string()))

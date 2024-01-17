@@ -34,7 +34,13 @@ pub async fn send_log_entry(entry: LogEntry) {
 	if buffer.len() == 1 {
 		drop(buffer); // release the lock
 		let settings = APP_SETTINGS_COPY.lock().await;
-		let flush_seconds = settings.telegram.flush_seconds.unwrap();
+		let flush_seconds = match settings.telegram.flush_seconds {
+			Some(seconds) => seconds,
+			None => {
+				println!("[telegram] flush_seconds not set, defaulting to 5 seconds");
+				5
+			},
+		};
 		drop(settings); // release the lock
 		
 		tokio::spawn(async move {
