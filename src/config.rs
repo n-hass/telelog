@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use config::Config;
 use serde::Deserialize;
 
-use clap::{arg, command, value_parser, ArgAction, Command};
+use clap::{arg, command, value_parser};
 
 #[derive(Debug, Deserialize)]
 pub struct AppSettings {
