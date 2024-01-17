@@ -14,6 +14,7 @@ lazy_static!(
 pub async fn init(settings: AppSettings) {
 	let mut app_settings_copy = APP_SETTINGS_COPY.lock().await;
 	*app_settings_copy = settings;
+	println!("[telegram] initialised");
 }
 
 pub async fn send_log_entry(entry: LogEntry) {
