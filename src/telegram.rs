@@ -46,10 +46,11 @@ pub async fn send_log_entry(entry: LogEntry) {
 async fn flush_log_buffer() {
 	let mut buffer = LOG_BUFFER.lock().await;
 	// parse the buffer to form the telegram message
-	let mut message = String::new();
+	let mut message = String::from("```\n");
 	for entry in buffer.borrow_mut().iter() {
 		message.push_str(&format!("[{}] {}: {}\n", entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message));
 	}
+	message.push_str("```");
 	buffer.clear();
 	drop(buffer); // release the lock
 
@@ -61,18 +62,18 @@ async fn flush_log_buffer() {
 
 	let client = reqwest::Client::new();
 	match client.post(&format!("https://api.telegram.org/bot{}/sendMessage", api_key))
-		.form(&[("chat_id", chat_id), ("text", message)])
+		.form(&[("chat_id", chat_id), ("text", message), ("parse_mode", "Markdown".to_string())])
 		.send()
 		.await {
-			Ok(response) => {
-				if response.status().is_success() {
-					return
-				}
-				println!("[telegram] API Error: {}", response.status());
-			},
-			Err(e) => {
-				println!("[telegram] Failed: {}", e);
+		Ok(response) => {
+			if response.status().is_success() {
+				return
 			}
+			println!("[telegram] API Error: {}", response.status());
+		},
+		Err(e) => {
+			println!("[telegram] Failed: {}", e);
 		}
+	}
 
 }

@@ -71,7 +71,7 @@ pub fn read_config() -> Result<AppSettings, config::ConfigError> {
 							return Ok(settings)
 						},
 						None => {
-							return Err(config::ConfigError::Message("Config does not contain telegram.api_key and TELEGRAM_API_KEY environment variable not set".to_string()))
+							return Err(config::ConfigError::Message("[config] No API key set in file as telegram.api_key, and no TELEGRAM_API_KEY environment variable".to_string()))
 						}
 					}
 				}
@@ -85,7 +85,7 @@ pub fn read_config() -> Result<AppSettings, config::ConfigError> {
 			else { return settings }
 		},
 		Err(e) => {
-			println!("Error reading config: {}", e);
+			println!("[config] Error reading config: {}", e);
 			Err(e)
 		}
 	}

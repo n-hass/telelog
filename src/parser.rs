@@ -63,7 +63,7 @@ pub fn parse_message(entry: Result<Option<sysjournal::JournalRecord>,systemd::Er
 			return None;
 		},
 		Err(e) => {
-			println!("[parser] Error: {}", e);
+			println!("[parse_message] Error: {}", e);
 			return None;
 		},
 	};

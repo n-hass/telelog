@@ -44,7 +44,7 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 					let field = i.to_string();
 					match journal.match_add(journald_field, field.as_bytes()) {
 						Ok(_) => {},
-						Err(e) => println!("Error adding priority filter: {}", e)
+						Err(e) => println!("[filter init] Error adding priority filter: {}", e)
 					}
 				}
 				
@@ -67,7 +67,7 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 				if filter.filter_type == "match" {
 					match journal.match_add(journald_field, filter.value.as_bytes()) {
 						Ok(_) => {},
-						Err(e) => println!("Error adding {} filter: {}",journald_field, e)
+						Err(e) => println!("[filter init] Error adding {} filter: {}",journald_field, e)
 					}
 				} 
 
@@ -92,7 +92,7 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 								);
 							}
 						},
-						Err(e) => println!("Error compiling regex for '{}': {}", journald_field , e),
+						Err(e) => println!("[filter init] Error compiling regex for '{}': {}", journald_field , e),
 					}
 				}
 			}
@@ -113,7 +113,7 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 				if filter.filter_type == "match" {
 					match journal.match_add(journald_field, filter.value.as_bytes()) {
 						Ok(_) => {},
-						Err(e) => println!("Error adding message filter: {}", e)
+						Err(e) => println!("[filter init] Error adding message filter: {}", e)
 					}
 				} 
 
@@ -138,7 +138,7 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 								);
 							}
 						},
-						Err(e) => println!("Error compiling regex for '{}': {}",journald_field, e),
+						Err(e) => println!("[filter init] Error compiling regex for '{}': {}",journald_field, e),
 					}
 				}
 			}
@@ -160,7 +160,7 @@ pub fn filter_log_entry(entry: &LogEntry) -> bool {
 			let entry_field_value = match entry.get_copy(filter_field) {
 				Ok(field) => field,
 				Err(e) => {
-					println!("Error getting field '{}': {}", filter_field, e);
+					println!("[filter_log_entry] Error getting field '{}': {}", filter_field, e);
 					continue;
 				}
 			};
@@ -178,7 +178,7 @@ pub fn filter_log_entry(entry: &LogEntry) -> bool {
 			let entry_field_value = match entry.get_copy(filter_field) {
 				Ok(field) => field,
 				Err(e) => {
-					println!("Error getting field '{}': {}", filter_field, e);
+					println!("[filter_log_entry] Error getting field '{}': {}", filter_field, e);
 					continue;
 				}
 			};

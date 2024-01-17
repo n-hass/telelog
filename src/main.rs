@@ -21,7 +21,7 @@ async fn process_entry(entry: Result<Option<sysjournal::JournalRecord>,systemd::
 			if filter_log_entry(&entry) {
 				return
 			}
-			println!("[{}] {}: {}", entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message);
+			// println!("[{}] {}: {}", entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message);
 			telegram::send_log_entry(entry).await;
 		},
 		None => {},
@@ -42,7 +42,7 @@ async fn process_batch(j: &mut SysJournal) {
 				break;
 			},
 			Err(e) => {
-				println!("[main loop] Error: {}", e);
+				println!("[process_batch] Error: {}", e);
 				break;
 			},
 		}
@@ -62,7 +62,7 @@ async fn main() {
 	let settings = match read_config() {
 		Ok(settings) => settings,
 		Err(e) => {
-			println!("Error reading config: {}", e);
+			println!("[main] Error reading config: {}", e);
 			return;
 		}
 	};
@@ -72,7 +72,7 @@ async fn main() {
 	loop {
 		match j.wait(None) {
 			Ok(_) => process_batch(&mut j).await,
-			Err(_) => println!("Timeout"),
+			Err(_) => println!("[main] Timeout"),
 		}
 	}
 }
