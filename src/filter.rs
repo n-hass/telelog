@@ -1,26 +1,26 @@
 use std::sync::Mutex;
 
-use crate::{config::AppSettings};
+use crate::config::AppSettings;
 use crate::journal::LogEntry;
 use systemd::Journal;
 use lazy_static::lazy_static;
 use regex::Regex;
 
 lazy_static!(
-	static ref FILTERS: Mutex<Vec<FieldFilter>> = Mutex::new(vec![]);
+	static ref ALLOW_FILTERS: Mutex<Vec<FieldFilter>> = Mutex::new(vec![]);
+	static ref DENY_FILTERS: Mutex<Vec<FieldFilter>> = Mutex::new(vec![]);
 );
 
 struct FieldFilter {
 	field: String,
-	val: String,
 	re: Option<Regex>,
-	action: bool
 }
 
 pub fn init(settings: &AppSettings, journal: &mut Journal) {
 	let filters = &settings.filters;
 	match &filters.priority {
 		Some(list) => {
+			let journald_field = "PRIORITY";
 			for filter in list {
 				let mut field = filter.value.clone();
 				
@@ -42,7 +42,7 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 				
 				for i in 0..=field_int {
 					let field = i.to_string();
-					match journal.match_add("PRIORITY", field.as_bytes()) {
+					match journal.match_add(journald_field, field.as_bytes()) {
 						Ok(_) => {},
 						Err(e) => println!("Error adding priority filter: {}", e)
 					}
@@ -55,40 +55,44 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 
 	match &filters.syslog_identifier {
 		Some(list) => {
+			let journald_field = "SYSLOG_IDENTIFIER";
 			for filter in list {
 
-				let action = match &filter.action {
-					Some(a) => {
-						match a.to_lowercase().as_str() {
-							"allow" => true,
-							"deny" => false,
-							_ => true,
-						}
-					},
-					None => true,
+				let action = if filter.action.as_ref().is_some_and(|a| a.to_lowercase() == "deny") {
+					false
+				} else {
+					true
 				};
 
 				if filter.filter_type == "match" {
-					match journal.match_add("SYSLOG_IDENTIFIER", filter.value.as_bytes()) {
+					match journal.match_add(journald_field, filter.value.as_bytes()) {
 						Ok(_) => {},
-						Err(e) => println!("Error adding syslog_identifier filter: {}", e)
+						Err(e) => println!("Error adding {} filter: {}",journald_field, e)
 					}
 				} 
 
 				if filter.filter_type == "pattern" {
 					match Regex::new(&filter.value) {
 						Ok(re) => {
-							let mut filters = FILTERS.lock().unwrap();
-							filters.push( 
-								FieldFilter {
-									field: "SYSLOG_IDENTIFIER".to_owned(),
-									val: filter.value.clone(),
-									re: Some(re),
-									action: action,
-								}
-							);
+							if action {
+								let mut allow = ALLOW_FILTERS.lock().unwrap();
+								allow.push( 
+									FieldFilter {
+										field: journald_field.to_owned(),
+										re: Some(re),
+									}
+								);
+							} else {
+								let mut deny = DENY_FILTERS.lock().unwrap();
+								deny.push( 
+									FieldFilter {
+										field: journald_field.to_owned(),
+										re: Some(re),
+									}
+								);
+							}
 						},
-						Err(e) => println!("Error compiling regex: {}", e),
+						Err(e) => println!("Error compiling regex for '{}': {}", journald_field , e),
 					}
 				}
 			}
@@ -99,20 +103,15 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 	match &filters.message {
 		Some(list) => {
 			for filter in list {
-				
-				let action = match &filter.action {
-					Some(a) => {
-						match a.to_lowercase().as_str() {
-							"allow" => true,
-							"deny" => false,
-							_ => true,
-						}
-					},
-					None => true,
+				let journald_field = "MESSAGE";
+				let action: bool = if filter.action.as_ref().is_some_and(|a| a.to_lowercase() == "deny") {
+					false
+				} else {
+					true
 				};
 
 				if filter.filter_type == "match" {
-					match journal.match_add("MESSAGE", filter.value.as_bytes()) {
+					match journal.match_add(journald_field, filter.value.as_bytes()) {
 						Ok(_) => {},
 						Err(e) => println!("Error adding message filter: {}", e)
 					}
@@ -121,17 +120,25 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 				if filter.filter_type == "pattern" {
 					match Regex::new(&filter.value) {
 						Ok(re) => {
-							let mut filters = FILTERS.lock().unwrap();
-							filters.push( 
-								FieldFilter {
-									field: "MESSAGE".to_owned(),
-									val: filter.value.clone(),
-									re: Some(re),
-									action: action,
-								}
-							);
+							if action {
+								let mut allow = ALLOW_FILTERS.lock().unwrap();
+								allow.push( 
+									FieldFilter {
+										field: journald_field.to_owned(),
+										re: Some(re),
+									}
+								);
+							} else {
+								let mut deny = DENY_FILTERS.lock().unwrap();
+								deny.push( 
+									FieldFilter {
+										field: journald_field.to_owned(),
+										re: Some(re),
+									}
+								);
+							}
 						},
-						Err(e) => println!("Error compiling regex: {}", e),
+						Err(e) => println!("Error compiling regex for '{}': {}",journald_field, e),
 					}
 				}
 			}
@@ -142,50 +149,43 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 }
 
 pub fn filter_log_entry(entry: &LogEntry) -> bool {
-	let filters = FILTERS.lock().unwrap();
-	let (true_filters, false_filters): (Vec<_>, Vec<_>) = filters.iter().partition(|filter| filter.action);
+	let allow_filters = ALLOW_FILTERS.lock().unwrap();
+	let deny_filters = DENY_FILTERS.lock().unwrap();
 	
-	for filter in false_filters {
-		match filter.field.as_str() {
-			"SYSLOG_IDENTIFIER" => {
-				if filter.re.is_some() {
-					let re = filter.re.as_ref().unwrap();
-					if re.is_match(&entry.identifier) {
-						return true;
-					}
+	
+	for filter in deny_filters.iter() {
+		let filter_field = filter.field.as_str();
+		if filter.re.is_some() {
+			let re = filter.re.as_ref().unwrap();
+			let entry_field_value = match entry.get_copy(filter_field) {
+				Ok(field) => field,
+				Err(e) => {
+					println!("Error getting field '{}': {}", filter_field, e);
+					continue;
 				}
+			};
+
+			if re.is_match(&entry_field_value) {
+				return true;
 			}
-			"MESSAGE" => {
-				if filter.re.is_some() {
-					let re = filter.re.as_ref().unwrap();
-					if re.is_match(&entry.message) {
-						return true;
-					}
-				}
-			}
-			_ => {},
 		}
 	}
 	
-	for filter in true_filters {
-		match filter.field.as_str() {
-			"SYSLOG_IDENTIFIER" => {
-				if filter.re.is_some() {
-					let re = filter.re.as_ref().unwrap();
-					if re.is_match(&entry.identifier) {
-						return false;
-					}
+	for filter in allow_filters.iter() {
+		let filter_field = filter.field.as_str();
+		if filter.re.is_some() {
+			let re = filter.re.as_ref().unwrap();
+			let entry_field_value = match entry.get_copy(filter_field) {
+				Ok(field) => field,
+				Err(e) => {
+					println!("Error getting field '{}': {}", filter_field, e);
+					continue;
 				}
+			};
+
+			if re.is_match(&entry_field_value) {
+				return false;
 			}
-			"MESSAGE" => {
-				if filter.re.is_some() {
-					let re = filter.re.as_ref().unwrap();
-					if re.is_match(&entry.message) {
-						return false;
-					}
-				}
-			}
-			_ => {},
 		}
 	}
 	

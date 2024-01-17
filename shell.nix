@@ -10,6 +10,8 @@ pkgs.mkShell {
     
     pkg-config
     systemd
+    openssl
+    libsodium
   ];
 
   RUST_BACKTRACE = 1;
@@ -17,6 +19,7 @@ pkgs.mkShell {
 
   NIX_LD_LIBRARY_PATH = lib.makeLibraryPath [
     stdenv.cc.cc
+    openssl
     glibc
     libz
   ];

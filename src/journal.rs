@@ -19,3 +19,17 @@ pub struct LogEntry {
 	pub message: String,
 	pub priority: u8,
 }
+
+impl LogEntry {
+	pub fn get_copy(&self, field_string: &str) -> Result<String, String> {
+		match field_string {
+			"timestamp" => Ok(self.timestamp.to_string()),
+			"identifier" => Ok(self.identifier.clone()),
+			"SYSLOG_IDENTIFIER" => Ok(self.identifier.clone()),
+			"message" => Ok(self.message.clone()),
+			"MESSAGE" => Ok(self.message.clone()),
+			"priority" => Ok(self.priority.to_string()),
+			_ => Err(format!("Field {} not found", field_string)),
+		}
+	}
+}

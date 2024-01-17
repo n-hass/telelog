@@ -4,7 +4,6 @@ use lazy_static::lazy_static;
 use systemd::journal as sysjournal;
 
 use crate::journal::LogEntry;
-use crate::filter::filter_log_entry;
 
 use regex::Regex;
 lazy_static!(
@@ -16,7 +15,7 @@ fn clean_message(message: &str) -> String {
 	RE.replace_all(message, "").trim_end_matches('\n').to_string()
 }
 
-fn parse_message(entry: Result<Option<sysjournal::JournalRecord>,systemd::Error>) -> Option<LogEntry> {
+pub fn parse_message(entry: Result<Option<sysjournal::JournalRecord>,systemd::Error>) -> Option<LogEntry> {
 	match entry {
 		Ok(Some(entry)) => 
 		{
@@ -68,16 +67,4 @@ fn parse_message(entry: Result<Option<sysjournal::JournalRecord>,systemd::Error>
 			return None;
 		},
 	};
-}
-
-pub fn print_a_message(entry: Result<Option<sysjournal::JournalRecord>,systemd::Error>) {
-	match parse_message(entry) {
-		Some(entry) => {
-			if filter_log_entry(&entry) {
-				return
-			}
-			println!("[{}] {}: {}", entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message);
-		},
-		None => {},
-	}
 }
