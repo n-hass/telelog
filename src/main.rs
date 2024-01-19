@@ -63,11 +63,13 @@ async fn main() {
 
 	let args = parse_cli_args();
 
-	let mut config_path = "/etc/telelog.toml";
-	match args.get_one::<PathBuf>("config") {
-		Some(path) => config_path = path.to_str().unwrap(),
-		None => println!("[main] Config file not specified, using '/etc/telelog.toml'"),
-	}
+	let config_path = match args.get_one::<PathBuf>("config") {
+		Some(path) => path.to_str().unwrap(),
+		None => {
+			println!("[main] Config file not specified, using '/etc/telelog.toml'");
+			"/etc/telelog.toml"
+		},
+	};
 
 	let settings = match read_config(config_path) {
 		Ok(settings) => settings,

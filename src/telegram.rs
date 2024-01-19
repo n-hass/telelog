@@ -9,6 +9,7 @@ use crate::config::AppSettings;
 lazy_static!(
 	static ref LOG_BUFFER: AsyncMutex<Vec<LogEntry>> = AsyncMutex::new(vec![]);
 	static ref APP_SETTINGS_COPY: AsyncMutex<AppSettings> = AsyncMutex::new(AppSettings::default());
+	static ref CLIENT: reqwest::Client = reqwest::Client::new();
 );
 
 pub async fn init(settings: AppSettings) {
@@ -93,8 +94,7 @@ async fn flush_log_buffer() {
 	let api_key = (settings.telegram.api_key.as_ref().unwrap()).to_owned();
 	drop(settings);
 
-	let client = reqwest::Client::new();
-	match client.post(&format!("https://api.telegram.org/bot{}/sendMessage", api_key))
+	match CLIENT.post(&format!("https://api.telegram.org/bot{}/sendMessage", api_key))
 		.form(&[("chat_id", chat_id), ("text", message), ("parse_mode", "HTML".to_string())])
 		.send()
 		.await {
