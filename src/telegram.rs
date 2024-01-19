@@ -1,4 +1,5 @@
 use lazy_static::lazy_static;
+use signal_hook::{consts::{SIGTERM,SIGINT}, iterator::Signals};
 use tokio;
 use tokio::sync::Mutex as AsyncMutex;
 use reqwest;
@@ -14,6 +15,21 @@ lazy_static!(
 pub async fn init(settings: AppSettings) {
 	let mut app_settings_copy = APP_SETTINGS_COPY.lock().await;
 	*app_settings_copy = settings;
+
+	tokio::task::spawn(async move {
+		let mut signals = Signals::new(&[SIGTERM, SIGINT]).unwrap();
+		for signal in signals.forever() {
+			match signal {
+				SIGTERM | SIGINT => {
+					println!("[telegram] Received stop signal");
+					flush_log_buffer().await;
+					std::process::exit(0);
+				},
+				_ => {},
+			};
+		}
+	});
+
 	println!("[telegram] initialised");
 }
 
@@ -90,9 +106,14 @@ async fn flush_log_buffer() {
 		
 		return true
 	});
+	drop(buffer); // release the lock
+
+	if message == "<code>\n" {
+		println!("[telegram] flush was ran, but buffer was empty");
+		return
+	}
 
 	message.push_str("</code>");
-	drop(buffer); // release the lock
 
 	// send the message to telegram
 	let settings = APP_SETTINGS_COPY.lock().await;
