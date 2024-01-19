@@ -1,0 +1,56 @@
+name: Release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "**/Cargo.toml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: "Create New Release"
+    runs-on: "ubuntu-latest"
+    
+    outputs:
+      version: ${{ steps.pkg.outputs.VERSION }}
+      exists: ${{ steps.check_tag.outputs.EXISTS }}
+
+    steps:
+      - name: "Check out the repo"
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Get the version number from this push"
+        id: pkg
+        shell: "bash"
+        run: |
+          VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/["]/, "", $2); printf("%s",$2) }' Cargo.toml)
+          echo VERSION=$VERSION >> $GITHUB_OUTPUT
+
+      - name: Check if this is a new version
+        id: check_tag
+        shell: bash
+        run: |
+          output=$(curl -s https://api.github.com/repos/$GITHUB_REPOSITORY/git/ref/tags/${{ steps.pkg.outputs.VERSION }})
+          message=$(echo "$output" | awk -F': ' '/"message":/ { gsub(/"/, "", $2); print $2; }' | tr -d ',')
+          echo EXISTS=$([ "$message" = "Not Found" ] && echo "false" || echo "true") >> $GITHUB_OUTPUT
+          echo $GITHUB_OUTPUT
+      
+      - name: Create a release
+        if: steps.check_tag.outputs.EXISTS == 'false'
+        uses: ncipollo/release-action@v1.12.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag: v${{ steps.pkg.outputs.VERSION }}
+          name: v${{ steps.pkg.outputs.VERSION }}
+          draft: false
+          prerelease: false

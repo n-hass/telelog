@@ -1,5 +1,4 @@
 use lazy_static::lazy_static;
-use std::borrow::BorrowMut;
 use tokio;
 use tokio::sync::Mutex as AsyncMutex;
 use reqwest;
@@ -80,12 +79,19 @@ async fn flush_log_buffer() {
 	let mut buffer = LOG_BUFFER.lock().await;
 	// parse the buffer to form the telegram message
 	let mut message = String::from("<code>\n");
-	for entry in buffer.borrow_mut().iter() {
-		let colour_symbol = colour_translate(entry.priority);
-		message.push_str(&format!("{}[{}] {}: {}\n", colour_symbol, entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message));
-	}
+
+	buffer.retain(|entry: &LogEntry| {
+		let new_entry_string = format!("{}[{}] {}: {}\n", colour_translate(entry.priority), entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message);
+		
+		if message.len() + new_entry_string.len() < 4088 {
+			message.push_str(&new_entry_string);
+			return false
+		}
+		
+		return true
+	});
+
 	message.push_str("</code>");
-	buffer.clear();
 	drop(buffer); // release the lock
 
 	// send the message to telegram
