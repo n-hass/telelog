@@ -32,7 +32,7 @@ jobs:
         id: pkg
         shell: "bash"
         run: |
-          VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/["]/, "", $2); printf("%s",$2) }' Cargo.toml)
+          VERSION=$(awk -F ' = ' '/^\[package\]/ { in_package = 1 } /^\[/ && !/^\[package\]/ { in_package = 0 } in_package && $1 ~ /version/ { gsub(/["]/, "", $2); printf("%s",$2); exit }' Cargo.toml)
           echo VERSION=$VERSION >> $GITHUB_OUTPUT
 
       - name: Check if this is a new version
