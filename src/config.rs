@@ -31,7 +31,7 @@ impl Default for AppSettings {
 pub struct TelegramSettings {
 	pub chat_id: String,
 	pub api_key: Option<String>,
-	pub flush_seconds: Option<u8>,
+	pub flush_seconds: Option<u16>,
 }
 
 #[derive(Debug, Deserialize)]
