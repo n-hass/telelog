@@ -21,8 +21,8 @@ struct TelegramContext {
 lazy_static!(
 	static ref LOG_ENTRY_BUFFER: AsyncMutex<Vec<LogEntry>> = AsyncMutex::new(Vec::new());
 	static ref PROCESSED_MESSAGE_BUFFER: AsyncMutex<Vec<String>> = AsyncMutex::new(Vec::new());
-	static ref REQUEST_CLIENT: reqwest::Client = reqwest::Client::new();
 	static ref SEND_LOCK: AsyncMutex<()> = AsyncMutex::new(());
+	static ref REQUEST_CLIENT: reqwest::Client = reqwest::Client::new();
 );
 static TELEGRAM_CONTEXT: OnceLock<TelegramContext> = OnceLock::new();
 

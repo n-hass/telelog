@@ -1,16 +1,14 @@
-use std::sync::Mutex;
+use std::sync::OnceLock;
 
 use crate::config::AppSettings;
 use crate::journal::LogEntry;
 use systemd::Journal;
-use lazy_static::lazy_static;
 use regex::Regex;
 
-lazy_static!(
-	static ref ALLOW_FILTERS: Mutex<Vec<FieldFilter>> = Mutex::new(vec![]);
-	static ref DENY_FILTERS: Mutex<Vec<FieldFilter>> = Mutex::new(vec![]);
-);
+static ALLOW_FILTERS: OnceLock<Vec<FieldFilter>> = OnceLock::new();
+static DENY_FILTERS: OnceLock<Vec<FieldFilter>> = OnceLock::new();
 
+#[derive(Debug)]
 struct FieldFilter {
 	field: String,
 	re: Option<Regex>,
@@ -18,6 +16,9 @@ struct FieldFilter {
 
 pub fn init(settings: &AppSettings, journal: &mut Journal) {
 	let filters = &settings.filters;
+	let mut temp_allow_filters: Vec<FieldFilter> = vec![];
+	let mut temp_deny_filters: Vec<FieldFilter> = vec![];
+
 	match &filters.priority {
 		Some(list) => {
 			let journald_field = "PRIORITY";
@@ -75,16 +76,14 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 					match Regex::new(&filter.value) {
 						Ok(re) => {
 							if action {
-								let mut allow = ALLOW_FILTERS.lock().unwrap();
-								allow.push( 
+								temp_allow_filters.push( 
 									FieldFilter {
 										field: journald_field.to_owned(),
 										re: Some(re),
 									}
 								);
 							} else {
-								let mut deny = DENY_FILTERS.lock().unwrap();
-								deny.push( 
+								temp_deny_filters.push( 
 									FieldFilter {
 										field: journald_field.to_owned(),
 										re: Some(re),
@@ -121,16 +120,14 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 					match Regex::new(&filter.value) {
 						Ok(re) => {
 							if action {
-								let mut allow = ALLOW_FILTERS.lock().unwrap();
-								allow.push( 
+								temp_allow_filters.push( 
 									FieldFilter {
 										field: journald_field.to_owned(),
 										re: Some(re),
 									}
 								);
 							} else {
-								let mut deny = DENY_FILTERS.lock().unwrap();
-								deny.push( 
+								temp_deny_filters.push( 
 									FieldFilter {
 										field: journald_field.to_owned(),
 										re: Some(re),
@@ -146,11 +143,13 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 		None => {},
 	}
 
+	ALLOW_FILTERS.set(temp_allow_filters).expect("Initialisation occurs once");
+	DENY_FILTERS.set(temp_deny_filters).expect("Initialisation occurs once");
 }
 
 pub fn filter_log_entry(entry: &LogEntry) -> bool {
-	let allow_filters = ALLOW_FILTERS.lock().unwrap();
-	let deny_filters = DENY_FILTERS.lock().unwrap();
+	let allow_filters = ALLOW_FILTERS.get().expect("Filters should be initialised");
+	let deny_filters = DENY_FILTERS.get().expect("Filters should be initialised");
 	
 	
 	for filter in deny_filters.iter() {
