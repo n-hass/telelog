@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use signal_hook::{consts::{SIGTERM,SIGINT}, iterator::Signals};
 use tokio::time::sleep;
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, mpsc};
 use reqwest;
 use std::time::Duration;
 use serde::Deserialize;
@@ -39,14 +39,14 @@ struct RetryParameters {
     retry_after: Option<u64>,
 }
 
-pub async fn init(settings: AppSettings) {
+pub fn init(settings: AppSettings, mut rx: mpsc::Receiver<LogEntry>) {
 	TELEGRAM_CONTEXT.set(TelegramContext {
 		chat_id: settings.telegram.chat_id,
 		api_key: settings.telegram.api_key.unwrap(),
 		flush_seconds: settings.telegram.flush_seconds.unwrap_or(5),
 	}).expect("Initialisation only occurs once");
 
-	tokio::task::spawn(async move {
+	tokio::spawn(async move {
 		let mut signals = Signals::new(&[SIGTERM, SIGINT]).unwrap();
 		for signal in signals.forever() {
 			match signal {
@@ -59,36 +59,37 @@ pub async fn init(settings: AppSettings) {
 			};
 		}
 	});
+	
+	// spawn a task to process messages as they are sent from the main task
+	tokio::spawn(async move {
+		while let Some(entry) = rx.recv().await {
+			let mut buffer = LOG_ENTRY_BUFFER.lock().await;
+			buffer.push(entry.clone());
+			if entry.priority <= 2 {
+				drop(buffer); // release the lock
+				// if this is a critical entry, flush the buffer immediately
+				tokio::spawn(async move {
+					flush_log_buffer().await;
+				});
+				continue
+			}
+			// otherwise schedule a flush if this is the first message in the buffer
+			if buffer.len() == 1 {
+				drop(buffer); // release the lock
+				let flush_seconds = match TELEGRAM_CONTEXT.get() {
+					Some(context) => context.flush_seconds,
+					None => 5,
+				};
+
+				tokio::spawn(async move {
+					sleep(Duration::from_secs(flush_seconds as u64)).await;
+					flush_log_buffer().await;
+				});
+			}
+		}
+	});
 
 	println!("[telegram] initialised");
-}
-
-pub async fn send_log_entry(entry: LogEntry) {
-	let mut buffer = LOG_ENTRY_BUFFER.lock().await;
-	buffer.push(entry.clone());
-
-	// if this is a critical entry, flush the buffer immediately
-	if entry.priority <= 2 {
-		drop(buffer); // release the lock
-		tokio::spawn(async move {
-			flush_log_buffer().await;
-		});
-		return
-	}
-
-	// otherwise schedule a flush if this is the first message in the buffer
-	if buffer.len() == 1 {
-		drop(buffer); // release the lock
-		let flush_seconds = match TELEGRAM_CONTEXT.get() {
-			Some(context) => context.flush_seconds,
-			None => 5,
-		};
-
-		tokio::spawn(async move {
-			sleep(Duration::from_secs(flush_seconds as u64)).await;
-			flush_log_buffer().await;
-		});
-	}
 }
 
 fn colour_translate(priority: u8) -> String {
@@ -160,14 +161,14 @@ async fn flush_log_buffer() {
 	drop(buffer); // release the lock
 
 	if message_list.len() == 0 {
-		println!("[telegram] flush was ran, but buffer was empty");
+		eprintln!("[telegram] flush was ran, but buffer was empty");
 		return
 	}
 
 	let (api_key, chat_id) = match TELEGRAM_CONTEXT.get() {
 		Some(context) => (context.api_key.clone(), context.chat_id.clone()),
 		None => {
-			println!("[telegram] flush was ran, but context was empty");
+			eprintln!("[telegram] flush was ran, but context was empty");
 			return
 		}
 	};
@@ -181,7 +182,7 @@ async fn flush_log_buffer() {
 			let result = send_telegram_message(message, &api_key, &chat_id).await;
 
 			if let Err(e) = result {
-				println!("[telegram] Failed: {}", e);
+				eprintln!("[telegram] Failed: {}", e);
 				new_unsent_messages.push(message.to_string());
 				continue
 			}
@@ -199,7 +200,7 @@ async fn flush_log_buffer() {
 							Ok(error_response) => {
 								if let Some(parameters) = error_response.parameters {
 									if let Some(retry_after) = parameters.retry_after {
-										println!("[telegram] API response 429: pausing messages for {} seconds", retry_after);
+										eprintln!("[telegram] API response 429: pausing messages for {} seconds", retry_after);
 										tokio::spawn(async move {
 											let _guard = SEND_LOCK.lock().await;
 											sleep(Duration::from_secs(retry_after)).await;
@@ -209,7 +210,7 @@ async fn flush_log_buffer() {
 								}
 							}
 							Err(e) => {
-								println!("[telegram] Failed to parse 429 response: {}", e);
+								eprintln!("[telegram] Failed to parse 429 response: {}", e);
 							}
 						}
 

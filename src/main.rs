@@ -4,7 +4,7 @@ use systemd::journal::Journal as SysJournal;
 use systemd::journal as sysjournal;
 
 mod journal;
-use journal::open_journal_tail;
+use journal::{open_journal_tail, LogEntry};
 
 mod config;
 use config::{read_config, AppSettings, parse_cli_args};
@@ -14,48 +14,45 @@ use parser::parse_message;
 
 mod filter;
 use filter::filter_log_entry;
+use tokio::sync::mpsc;
 
 mod telegram;
 
-async fn process_entry(entry: Result<Option<sysjournal::JournalRecord>,systemd::Error>) {
+async fn process_entry(entry: sysjournal::JournalRecord, telegram_tx: &mpsc::Sender<LogEntry>) {
 	match parse_message(entry) {
 		Some(entry) => {
 			if filter_log_entry(&entry) {
 				return
 			}
-			// println!("[{}] {}: {}", entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message);
-			telegram::send_log_entry(entry).await;
+			match telegram_tx.send(entry).await {
+				Ok(_) => {},
+				Err(e) => println!("[process_entry] Error in message channel: {}", e),
+			};
 		},
 		None => {},
 	}
 }
 
-async fn process_batch(j: &mut SysJournal) {
-	let entry = j.next_entry();
-	process_entry(entry).await;
+async fn process_batch(j: &mut SysJournal, telegram_tx: &mpsc::Sender<LogEntry>) {
+	if let Ok(Some(entry)) = j.next_entry() {
+		process_entry(entry, telegram_tx).await;
+	}
 
 	loop {
-		let next = j.next_entry();
-		match next {
-			Ok(Some(_)) => {
-				process_entry(next).await;
-			},
-			Ok(None) => {
-				break;
-			},
-			Err(e) => {
-				println!("[process_batch] Error: {}", e);
-				break;
-			},
+		if let Ok(Some(next)) = j.next_entry() {
+			process_entry(next, telegram_tx).await;
+		} else {
+			break;
 		}
 	}
 }
 
-async fn init(settings: AppSettings) -> SysJournal {
+fn init(settings: AppSettings) -> (SysJournal, mpsc::Sender<LogEntry>) {
 	let mut j = open_journal_tail();
 	filter::init(&settings, &mut j);
-	telegram::init(settings).await;
-	j
+	let (tx, rx) = tokio::sync::mpsc::channel::<LogEntry>(40);
+	telegram::init(settings, rx);
+	(j, tx)
 }
 
 #[tokio::main]
@@ -79,11 +76,11 @@ async fn main() {
 		}
 	};
 
-	let mut j = init(settings).await;
+	let (mut j, tx) = init(settings);
 
 	loop {
 		match j.wait(None) {
-			Ok(_) => process_batch(&mut j).await,
+			Ok(_) => process_batch(&mut j, &tx).await,
 			Err(_) => println!("[main] Timeout"),
 		}
 	}
