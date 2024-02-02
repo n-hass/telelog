@@ -1,14 +1,14 @@
 use lazy_static::lazy_static;
 use signal_hook::{consts::{SIGTERM,SIGINT}, iterator::Signals};
 use tokio::time::sleep;
-use tokio::sync::{Mutex as AsyncMutex, mpsc};
+use tokio::sync::{Mutex as AsyncMutex, mpsc, Notify};
 use reqwest;
 use std::time::Duration;
 use serde::Deserialize;
 use serde_json::Error as JsonError;
 use std::sync::OnceLock;
 
-use crate::journal::LogEntry;
+use crate::{helpers::*, journal::LogEntry};
 use crate::config::AppSettings;
 
 #[derive(Debug)]
@@ -23,6 +23,8 @@ lazy_static!(
 	static ref PROCESSED_MESSAGE_BUFFER: AsyncMutex<Vec<String>> = AsyncMutex::new(Vec::new());
 	static ref SEND_LOCK: AsyncMutex<()> = AsyncMutex::new(());
 	static ref REQUEST_CLIENT: reqwest::Client = reqwest::Client::new();
+	static ref RETRY_FLAG: Notify = Notify::new();
+	static ref RETRY_COUNT: AsyncMutex<u64> = AsyncMutex::new(1);
 );
 static TELEGRAM_CONTEXT: OnceLock<TelegramContext> = OnceLock::new();
 
@@ -40,12 +42,14 @@ struct RetryParameters {
 }
 
 pub fn init(settings: AppSettings, mut rx: mpsc::Receiver<LogEntry>) {
+	let flush_seconds = settings.telegram.flush_seconds.unwrap_or(5);
 	TELEGRAM_CONTEXT.set(TelegramContext {
 		chat_id: settings.telegram.chat_id,
 		api_key: settings.telegram.api_key.unwrap(),
-		flush_seconds: settings.telegram.flush_seconds.unwrap_or(5),
+		flush_seconds: flush_seconds,
 	}).expect("Initialisation only occurs once");
 
+	// task to handle incoming signals
 	tokio::spawn(async move {
 		let mut signals = Signals::new(&[SIGTERM, SIGINT]).unwrap();
 		for signal in signals.forever() {
@@ -89,54 +93,22 @@ pub fn init(settings: AppSettings, mut rx: mpsc::Receiver<LogEntry>) {
 		}
 	});
 
-	println!("[telegram] initialised");
-}
-
-fn colour_translate(priority: u8) -> String {
-	// match priority {
-	// 	0 => "#FF3333".to_owned(),
-	// 	1 => "#FF6600".to_owned(),
-	// 	2 => "#800080".to_owned(),
-	// 	3 => "#B22222".to_owned(),
-	// 	4 => "#FFD700".to_owned(),
-	// 	5 => "#87CEEB".to_owned(),
-	// 	6 => "#4169E1".to_owned(),
-	// 	7 => "#CDD1D3".to_owned(),
-	// 	_ => "#000000".to_owned(),
-	// }
-	match priority {
-		0 => "☢️".to_owned(),
-		1 => "‼️".to_owned(),
-		2 => "🟣".to_owned(),
-		3 => "⭕️".to_owned(),
-		4 => "🟡".to_owned(),
-		5 => "🔵".to_owned(),
-		6 => "⚫️".to_owned(),
-		7 => "⚪️".to_owned(),
-		_ => "⚪️".to_owned(),
-	}
-}
-
-fn generate_messages(buffer: &Vec<LogEntry>) -> Vec<String> {
-	let mut message_list: Vec<String> = vec![];
-	let mut current_message = String::from("<code>\n");
-
-	for entry in buffer {
-		let new_entry_string = format!("{}[{}] {}: {}\n", colour_translate(entry.priority), entry.timestamp.format("%b %d %H:%M:%S"), entry.identifier, entry.message);
-		
-		if current_message.len() + new_entry_string.len() >= 4088 {
-			current_message.push_str("</code>");
-			message_list.push(current_message);
-			current_message = String::from("<code>\n");
+	// task to handle retrying failed flushes
+	tokio::spawn( async move {
+		loop {
+			RETRY_FLAG.notified().await;
+			let retry_count = RETRY_COUNT.lock().await;
+			if *retry_count > 5 {
+				// TODO: write to disk maybe?
+			};
+			sleep(Duration::from_secs(*retry_count * 2 * flush_seconds as u64)).await;
+			tokio::spawn(async move {
+				flush_log_buffer().await;
+			});
 		}
+	});
 
-		current_message.push_str(&new_entry_string);
-	}
-	if current_message != "<code>\n" {
-		current_message.push_str("</code>");
-		message_list.push(current_message);
-	}
-	return message_list
+	println!("[telegram] initialised");
 }
 
 async fn send_telegram_message(message: &String, api_key: &String, chat_id: &String) -> Result<reqwest::Response, reqwest::Error> {
@@ -174,58 +146,64 @@ async fn flush_log_buffer() {
 	};
 
 	let mut old_unsent_messages = PROCESSED_MESSAGE_BUFFER.lock().await;
-	let mut new_unsent_messages: Vec<String> = Vec::new();
+	let mut failed_unsent_messages: Vec<String> = Vec::new();
+
+	let all_unsent_messages = flatten_messages([&old_unsent_messages, &message_list]);
 
 	// try sending all the messages
-	for buffer in [&old_unsent_messages, &message_list] {
-		for message in buffer {
-			let result = send_telegram_message(message, &api_key, &chat_id).await;
+	for message in all_unsent_messages {
+		let result = send_telegram_message(&message, &api_key, &chat_id).await;
 
-			if let Err(e) = result {
-				eprintln!("[telegram] Failed: {}", e);
-				new_unsent_messages.push(message.to_string());
-				continue
-			}
+		if let Err(e) = result {
+			eprintln!("[telegram] Failed: {}", e);
+			failed_unsent_messages.push(message.to_string());
+			continue
+		}
 
-			let response = result.unwrap();
+		let response = result.unwrap();
 
-			if !response.status().is_success() {
-				let status = response.status();
-				let text = response.text().await.unwrap();
-			
-				// Error handling specifics
-				match status.as_u16() {
-					429 => {
-						match serde_json::from_str(&text) as Result<ErrorResponse, JsonError> {
-							Ok(error_response) => {
-								if let Some(parameters) = error_response.parameters {
-									if let Some(retry_after) = parameters.retry_after {
-										eprintln!("[telegram] API response 429: pausing messages for {} seconds", retry_after);
-										tokio::spawn(async move {
-											let _guard = SEND_LOCK.lock().await;
-											sleep(Duration::from_secs(retry_after)).await;
-											drop(_guard);
-										});
-									}
+		if !response.status().is_success() {
+			let status = response.status();
+			let text = response.text().await.unwrap();
+		
+			// Error handling specifics
+			match status.as_u16() {
+				429 => {
+					match serde_json::from_str(&text) as Result<ErrorResponse, JsonError> {
+						Ok(error_response) => {
+							if let Some(parameters) = error_response.parameters {
+								if let Some(retry_after) = parameters.retry_after {
+									eprintln!("[telegram] API response 429: pausing messages for {} seconds", retry_after);
+									tokio::spawn(async move {
+										let _guard = SEND_LOCK.lock().await;
+										sleep(Duration::from_secs(retry_after)).await;
+										drop(_guard);
+									});
 								}
 							}
-							Err(e) => {
-								eprintln!("[telegram] Failed to parse 429 response: {}", e);
-							}
 						}
-
-						new_unsent_messages.push(message.to_string());
-					},
-					_ => {
-						println!("[telegram] API response {}: {:?}", status, text);
-						// new_unsent_messages.push(message.to_string());
+						Err(e) => {
+							eprintln!("[telegram] Failed to parse 429 response: {}", e);
+						}
 					}
+
+					failed_unsent_messages.push(message.to_string());
+				},
+				_ => {
+					println!("[telegram] API response {}: {:?}", status, text);
+					failed_unsent_messages.push(message.to_string());
 				}
 			}
 		}
 	}
+	
+	let mut retry_count = RETRY_COUNT.lock().await;
+	if failed_unsent_messages.len() > 0 {
+		*retry_count *= 2;
+		RETRY_FLAG.notify_one();
+	} else {
+		*retry_count = 1;
+	}
 
-	*old_unsent_messages = new_unsent_messages;
-
-	drop(old_unsent_messages);
+	*old_unsent_messages = failed_unsent_messages;
 }

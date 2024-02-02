@@ -17,6 +17,7 @@ use filter::filter_log_entry;
 use tokio::sync::mpsc;
 
 mod telegram;
+mod helpers;
 
 async fn process_entry(entry: sysjournal::JournalRecord, telegram_tx: &mpsc::Sender<LogEntry>) {
 	match parse_message(entry) {
