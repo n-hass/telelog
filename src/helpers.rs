@@ -72,6 +72,6 @@ pub fn colour_translate(priority: u8) -> String {
 		5 => "🔵".to_owned(),
 		6 => "⚫️".to_owned(),
 		7 => "⚪️".to_owned(),
-		_ => "⚪️".to_owned(),
+		_ => "❓".to_owned(),
 	}
 }
