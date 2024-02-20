@@ -39,19 +39,19 @@ pub struct TelegramSettings {
 #[derive(Debug, Deserialize)]
 pub struct Rule {
     pub field: String,
-    pub value: Value,
-    #[serde(default = "Rule::default_rule")]
-    pub rule: RuleType,
+    pub value: RuleValue,
+    #[serde(rename = "rule", default = "Rule::default_rule")]
+    pub logic: RuleType,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-pub enum Value {
+pub enum RuleValue {
     Single(String),
     Multiple(Vec<String>),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub enum RuleType {
     #[serde(rename = "any")]
     Any,

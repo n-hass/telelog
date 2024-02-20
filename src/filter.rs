@@ -1,192 +1,255 @@
 use std::sync::OnceLock;
 
-use crate::config::AppSettings;
+use crate::config::{AppSettings, RuleType, RuleValue};
 use crate::journal::LogEntry;
 use systemd::Journal;
 use regex::Regex;
 
-static ALLOW_FILTERS: OnceLock<Vec<FieldFilter>> = OnceLock::new();
-static DENY_FILTERS: OnceLock<Vec<FieldFilter>> = OnceLock::new();
+static FILTERS: OnceLock<FilterSet> = OnceLock::new();
+
+
+#[derive(Debug, PartialEq)]
+enum FilterAction {
+	Allow,
+	Deny,
+}
 
 #[derive(Debug)]
 struct FieldFilter {
 	field: String,
-	re: Option<Regex>,
+	re: Vec<Regex>,
+	logic: RuleType,
+	action: FilterAction,
+	priority: u32,
+}
+
+#[derive(Debug)]
+struct FilterSet {
+	filters: Vec<FieldFilter>,
+}
+
+impl FilterSet {
+	pub fn new() -> Self {
+		FilterSet {
+			filters: Vec::new(),
+		}
+	}
+
+	pub fn add(&mut self, filter: FieldFilter) {
+		// when inserting must maintain priority order from lowest num to highest num
+		// if priority is the same, sory by filter.action. true (deny) should come before false (allow)
+
+		if self.filters.is_empty() {
+			self.filters.push(filter);
+			return;
+		}
+		let priority = filter.priority;
+		let mut insert_index = 0;
+		for (i, f) in self.filters.iter().enumerate() {
+			if priority < f.priority {
+				insert_index = i;
+				break;
+			} else if priority == f.priority {
+				// if this filter is a deny filter, insert it before the other filters of the same priority
+				if filter.action == FilterAction::Deny {
+					insert_index = i;
+					break;
+				}
+
+				// if this is an allow filter, find the next allow filter and insert before it
+				for (j, f) in self.filters.iter().enumerate().skip(i) {
+					if f.action == FilterAction::Allow || priority < f.priority { 
+						insert_index = j;
+						break;
+					}
+				}
+
+				break
+			} else {
+				insert_index = i + 1;
+			}
+		}
+
+		self.filters.insert(insert_index, filter);
+	}
+
+	pub fn get(&self) -> &Vec<FieldFilter> {
+		&self.filters
+	}
 }
 
 pub fn init(settings: &AppSettings, journal: &mut Journal) {
-	let filters = &settings.filters;
-	let mut temp_allow_filters: Vec<FieldFilter> = vec![];
-	let mut temp_deny_filters: Vec<FieldFilter> = vec![];
+	let mut temp_filters = FilterSet::new();
 
-	match &filters.priority {
-		Some(list) => {
-			let journald_field = "PRIORITY";
-			for filter in list {
-				let mut field = filter.value.clone();
-				
-				if &filter.filter_type == "pattern" {
-					field = match field.to_lowercase().as_str() {
-						"emerg" => "0".to_string(),
-						"alert" => "1".to_string(),
-						"crit" => "2".to_string(),
-						"err" => "3".to_string(),
-						"warning" => "4".to_string(),
-						"notice" => "5".to_string(),
-						"info" => "6".to_string(),
-						"debug" => "7".to_string(),
-						&_ => "7".to_string(),
-					}
-				}
+	if let Some(rule_groups) = &settings.match_rules {
+		let mut group_iter = rule_groups.iter().peekable();
+		while let Some((_priority,rules)) = group_iter.next() {
+			let mut rules_iter = rules.iter().peekable();
+			while let Some(rule) = rules_iter.next() {
+				let journald_field = rule.field.as_str();
 
-				let field_int = field.parse::<u8>().unwrap();
-				
-				for i in 0..=field_int {
-					let field = i.to_string();
-					match journal.match_add(journald_field, field.as_bytes()) {
-						Ok(_) => {},
-						Err(e) => println!("[filter init] Error adding priority filter: {}", e)
-					}
-				}
-				
-			}
-		},
-		None => {},
-	}
+				match &rule.value {
+					RuleValue::Single(value) => {
+						match journal.match_add(journald_field, value.as_bytes()) {
+							Ok(_) => {},
+							Err(e) => println!("[filter init] Error adding {} filter: {}", journald_field, e)
+						}
+					},
+					RuleValue::Multiple(values) => {
+						let mut values_iter = values.iter().peekable();
 
-	match &filters.syslog_identifier {
-		Some(list) => {
-			let journald_field = "SYSLOG_IDENTIFIER";
-			for filter in list {
-
-				let action = if filter.action.as_ref().is_some_and(|a| a.to_lowercase() == "deny") {
-					false
-				} else {
-					true
-				};
-
-				if filter.filter_type == "match" {
-					match journal.match_add(journald_field, filter.value.as_bytes()) {
-						Ok(_) => {},
-						Err(e) => println!("[filter init] Error adding {} filter: {}",journald_field, e)
-					}
-				} 
-
-				if filter.filter_type == "pattern" {
-					match Regex::new(&filter.value) {
-						Ok(re) => {
-							if action {
-								temp_allow_filters.push( 
-									FieldFilter {
-										field: journald_field.to_owned(),
-										re: Some(re),
-									}
-								);
-							} else {
-								temp_deny_filters.push( 
-									FieldFilter {
-										field: journald_field.to_owned(),
-										re: Some(re),
-									}
-								);
+						while let Some(value) = values_iter.next() {
+							match journal.match_add(journald_field, value.as_bytes()) {
+								Ok(_) => {},
+								Err(e) => println!("[filter init] Error adding {} filter: {}", journald_field, e)
 							}
-						},
-						Err(e) => println!("[filter init] Error compiling regex for '{}': {}", journald_field , e),
-					}
-				}
-			}
-		},
-		None => {},
-	}
 
-	match &filters.message {
-		Some(list) => {
-			for filter in list {
-				let journald_field = "MESSAGE";
-				let action: bool = if filter.action.as_ref().is_some_and(|a| a.to_lowercase() == "deny") {
-					false
-				} else {
-					true
-				};
-
-				if filter.filter_type == "match" {
-					match journal.match_add(journald_field, filter.value.as_bytes()) {
-						Ok(_) => {},
-						Err(e) => println!("[filter init] Error adding message filter: {}", e)
-					}
-				} 
-
-				if filter.filter_type == "pattern" {
-					match Regex::new(&filter.value) {
-						Ok(re) => {
-							if action {
-								temp_allow_filters.push( 
-									FieldFilter {
-										field: journald_field.to_owned(),
-										re: Some(re),
+							if values_iter.peek().is_some() {
+								if rule.logic == RuleType::All {
+									match journal.match_and() {
+										Ok(_) => {},
+										Err(e) => println!("[filter init] Error adding match AND filter: {}", e)
 									}
-								);
-							} else {
-								temp_deny_filters.push( 
-									FieldFilter {
-										field: journald_field.to_owned(),
-										re: Some(re),
+								} else {
+									match journal.match_or() {
+										Ok(_) => {},
+										Err(e) => println!("[filter init] Error adding match OR filter: {}", e)
 									}
-								);
+								}
 							}
-						},
-						Err(e) => println!("[filter init] Error compiling regex for '{}': {}",journald_field, e),
+						}
+					},
+				}
+
+				// When multiple rules are specified in a group, they are always ANDed together
+				if rules_iter.peek().is_some() {
+					match journal.match_and() {
+						Ok(_) => {},
+						Err(e) => println!("[filter init] Error adding AND filter: {}", e)
 					}
 				}
 			}
-		},
-		None => {},
+
+			// When multiple groups are specified, they are always ORed together
+			if group_iter.peek().is_some() {
+				match journal.match_or() {
+					Ok(_) => {},
+					Err(e) => println!("[filter init] Error adding OR filter: {}", e)
+				}
+			}
+		}
 	}
 
-	ALLOW_FILTERS.set(temp_allow_filters).expect("Initialisation occurs once");
-	DENY_FILTERS.set(temp_deny_filters).expect("Initialisation occurs once");
+	if let Some(rule_groups) = &settings.deny_rules {
+		for (priority,rules) in rule_groups.iter() {
+			for rule in rules.iter() {
+
+				match &rule.value {
+					RuleValue::Single(value) => {
+						let re = Regex::new(value);
+						if re.is_err() {
+							println!("[filter init] Error compiling regex for '{}': {}", rule.field, re.err().unwrap());
+							continue;
+						}
+						let re = re.unwrap();
+
+						temp_filters.add(
+							FieldFilter {
+								field: rule.field.clone(),
+								re: vec![re],
+								logic: rule.logic.clone(),
+								action: FilterAction::Deny,
+								priority: *priority,
+							}
+						);
+
+					},
+					RuleValue::Multiple(values) => {
+						let mut patterns = Vec::<Regex>::new();
+						for value in values.iter() {
+							let re = Regex::new(value);
+							if re.is_err() {
+								println!("[filter init] Error compiling regex for '{}': {}", rule.field, re.err().unwrap());
+								continue;
+							}
+							let re = re.unwrap();
+							patterns.push(re);
+						}
+
+						temp_filters.add(
+							FieldFilter {
+								field: rule.field.clone(),
+								re: patterns,
+								logic: rule.logic.clone(),
+								action: FilterAction::Deny,
+								priority: *priority,
+							}
+						);
+					},
+				}
+
+			}
+		}
+	}
+
+	if let Some(rule_groups) = &settings.allow_rules {
+		for (priority,rules) in rule_groups.iter() {
+			for rule in rules.iter() {
+
+				match &rule.value {
+					RuleValue::Single(value) => {
+						let re = Regex::new(value);
+						if re.is_err() {
+							println!("[filter init] Error compiling regex for '{}': {}", rule.field, re.err().unwrap());
+							continue;
+						}
+						let re = re.unwrap();
+
+						temp_filters.add(
+							FieldFilter {
+								field: rule.field.clone(),
+								re: vec![re],
+								logic: rule.logic.clone(),
+								action: FilterAction::Allow,
+								priority: *priority,
+							}
+						);
+
+					},
+					RuleValue::Multiple(values) => {
+						let mut patterns = Vec::<Regex>::new();
+						for value in values.iter() {
+							let re = Regex::new(value);
+							if re.is_err() {
+								println!("[filter init] Error compiling regex for '{}': {}", rule.field, re.err().unwrap());
+								continue;
+							}
+							let re = re.unwrap();
+							patterns.push(re);
+						}
+
+						temp_filters.add(
+							FieldFilter {
+								field: rule.field.clone(),
+								re: patterns,
+								logic: rule.logic.clone(),
+								action: FilterAction::Allow,
+								priority: *priority,
+							}
+						);
+					},
+				}
+
+			}
+		}
+	}
+
+	FILTERS.set(temp_filters).expect("Initialisation occurs once");
 }
 
+/// Returns true if a log should be filtered (ignored), returns false if it should be processed
 pub fn filter_log_entry(entry: &LogEntry) -> bool {
-	let allow_filters = ALLOW_FILTERS.get().expect("Filters should be initialised");
-	let deny_filters = DENY_FILTERS.get().expect("Filters should be initialised");
 	
-	
-	for filter in deny_filters.iter() {
-		let filter_field = filter.field.as_str();
-		if filter.re.is_some() {
-			let re = filter.re.as_ref().unwrap();
-			let entry_field_value = match entry.get_copy(filter_field) {
-				Ok(field) => field,
-				Err(e) => {
-					println!("[filter_log_entry] Error getting field '{}': {}", filter_field, e);
-					continue;
-				}
-			};
-
-			if re.is_match(&entry_field_value) {
-				return true;
-			}
-		}
-	}
-	
-	for filter in allow_filters.iter() {
-		let filter_field = filter.field.as_str();
-		if filter.re.is_some() {
-			let re = filter.re.as_ref().unwrap();
-			let entry_field_value = match entry.get_copy(filter_field) {
-				Ok(field) => field,
-				Err(e) => {
-					println!("[filter_log_entry] Error getting field '{}': {}", filter_field, e);
-					continue;
-				}
-			};
-
-			if re.is_match(&entry_field_value) {
-				return false;
-			}
-		}
-	}
 	
 	false
 }
