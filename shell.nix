@@ -7,6 +7,7 @@ pkgs.mkShell {
     rustfmt
     rust-analyzer
     clippy
+    lldb
     
     pkg-config
     systemd
