@@ -65,7 +65,8 @@ async fn main() {
 		Some(path) => path.to_str().unwrap(),
 		None => {
 			println!("[main] Config file not specified, using '/etc/telelog.toml'");
-			"/etc/telelog.toml"
+			// "/etc/telelog.toml"
+			"./example/private.toml"
 		},
 	};
 

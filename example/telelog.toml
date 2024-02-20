@@ -1,0 +1,17 @@
+[telegram]
+chat_id = "123456"
+flush_seconds = 5
+
+[filters]
+PRIORITY = [ {type="match", value="5"} ]
+SYSLOG_IDENTIFIER = [
+	# skip some container logs which are spammy and not useful
+	{type="pattern", value="aardvark-dns|scrutiny|caddy|overseerr|winbindd|sabnzbd|calibre", action="deny"}
+]
+MESSAGE = [
+	{type="pattern", value="RequiresMountsFor=|podman-.*\\.service", action="deny"}, # more container stuff to skip
+	{type="pattern", value="unix_listener: cannot bind to path /run/user/0/gnupg/S.gpg-agent", action="deny"},
+	{type="pattern", value="auto-fix-vscode-server.service: Failed to open", action="deny"},
+	{type="pattern", value="nixos-rebuild-switch-to-configuration.service.*No such file or directory", action="deny"},
+	{type="pattern", value="Unable to open: No such file or directory", action="deny"}, # from Plex audiobooks
+]
