@@ -1,5 +1,4 @@
-use core::time;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use chrono::{DateTime,Local};
 use systemd::{journal, Journal};
@@ -40,6 +39,7 @@ impl LogEntry {
 			"PRIORITY" => Ok(self.priority.to_string()),
 			"TIMESTAMP" => Ok(self.timestamp.to_string()),
 			"_SOURCE_REALTIME_TIMESTAMP" => Ok(self.timestamp.to_string()),
+			"SYSLOG_IDENTIFIER" => Ok(self.identifier.to_owned()),
 			"IDENTIFIER" => Ok(self.identifier.to_owned()),
 			"MESSAGE" => Ok(self.message.to_owned()),
 			_ => self.raw_fields.get(field_string).map(|s| s.to_owned()).ok_or_else(|| format!("[LogEntry get] Field {} not found", field_string))

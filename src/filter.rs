@@ -79,9 +79,9 @@ impl RuleSet {
 		self.filters.insert(insert_index, filter);
 	}
 
-	pub fn get(&self) -> &Vec<RuleGroup> {
-		&self.filters
-	}
+	// pub fn get(&self) -> &Vec<RuleGroup> {
+	// 	&self.filters
+	// }
 }
 
 pub fn init(settings: &AppSettings, journal: &mut Journal) {
@@ -249,30 +249,33 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 
 /// Returns true if a log should be filtered (ignored), returns false if it should be processed
 pub fn filter_log_entry(entry: &LogEntry) -> bool {
-	let rules: &Vec<RuleGroup> = RULESET.get().unwrap().filters.borrow();
+	let ruleset: &Vec<RuleGroup> = RULESET.get().unwrap().filters.borrow();
 	
-	for rule_group in rules.iter() {
-		for rule in rule_group.rules.iter() {
-			let rule_field = rule.field.as_str();
+	for rule_group in ruleset.iter() {
+		let group_is_match = rule_group.rules.iter().all(|rule| { // when multiple rules are specified in a group, they are always ANDed together
+			let log_field = match entry.get_field(&rule.field) {
+				Ok(v) => v,
+				Err(e) => {
+					println!("[filter_log_entry] Error getting field {}: {}", &rule.field, e);
+					return false;
+				},
+			};
 
-			for re in rule.re.iter() {
-				let log_field = match entry.get_field(rule_field) {
-					Ok(v) => v,
-					Err(e) => {
-						println!("[filter_log_entry] Error getting field {}: {}", rule_field, e);
-						continue;
-					},
-				};
+			let matched = match rule.logic {
+				RuleLogic::Any => rule.re.iter().any(|re| re.is_match(&log_field)),
+				RuleLogic::All => rule.re.iter().all(|re| re.is_match(&log_field)),
+			};
 
-				if re.is_match(&log_field) {
-					match rule_group.action {
-						RuleAction::Allow => return false,
-						RuleAction::Deny => return true,
-					}
-				}
+			return matched
+		});
+
+		if group_is_match {
+			return match rule_group.action {
+				RuleAction::Allow => false,
+				RuleAction::Deny => true,
 			}
 		}
 	}
 	
-	false
+	false // if no rules match, allow the log through by default
 }
