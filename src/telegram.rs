@@ -4,7 +4,7 @@ use tokio::time::sleep;
 use tokio::sync::{Mutex as AsyncMutex, mpsc, Notify};
 use reqwest;
 use std::time::Duration;
-use serde::Deserialize;
+use serde_derive::Deserialize;
 use serde_json::Error as JsonError;
 use std::sync::OnceLock;
 

@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fmt, path::PathBuf};
 use serde::{de::{self, Error, MapAccess, Visitor}, Deserialize, Deserializer};
+use serde_derive::Deserialize;
 
 use clap::{arg, command, value_parser};
 
