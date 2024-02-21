@@ -143,7 +143,13 @@ pub fn parse_cli_args() -> clap::ArgMatches {
 
 pub fn read_config(filepath: &str) -> Result<AppSettings, toml::de::Error> {
 
-	let config_str = std::fs::read_to_string(filepath).unwrap();
+	let config_str = match std::fs::read_to_string(filepath) {
+        Ok(config) => config,
+        Err(e) => {
+            return Err(toml::de::Error::custom(format!("Error reading config file: {}", e)));
+        }
+    };
+
 	let config: Result<AppSettings, toml::de::Error> = toml::from_str(&config_str);
 	if config.is_err() {
 		return config;

@@ -20,7 +20,10 @@
 				}
 			},
 			"envFile": "/root/.config/telelog/env",
-			"args": [],
+			"args": [
+				"-c",
+				"example/telelog.toml"
+			],
 			"cwd": "${workspaceFolder}",
 		},
 		{
