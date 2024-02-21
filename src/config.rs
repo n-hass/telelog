@@ -8,9 +8,9 @@ pub struct AppSettings {
 	pub telegram: TelegramSettings,
 	#[serde(rename = "match", deserialize_with = "deserialize_rule_group")]
     pub match_rules: Option<HashMap<u32, Vec<Rule>>>,
-	#[serde(rename = "allow", deserialize_with = "deserialize_rule_group")]
-    pub deny_rules: Option<HashMap<u32, Vec<Rule>>>,
 	#[serde(rename = "deny", deserialize_with = "deserialize_rule_group")]
+    pub deny_rules: Option<HashMap<u32, Vec<Rule>>>,
+	#[serde(rename = "allow", deserialize_with = "deserialize_rule_group")]
     pub allow_rules: Option<HashMap<u32, Vec<Rule>>>,
 }
 
@@ -41,7 +41,7 @@ pub struct Rule {
     pub field: String,
     pub value: RuleValue,
     #[serde(rename = "rule", default = "Rule::default_rule")]
-    pub logic: RuleType,
+    pub logic: RuleLogic,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,8 +51,8 @@ pub enum RuleValue {
     Multiple(Vec<String>),
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq)]
-pub enum RuleType {
+#[derive(Debug, Deserialize, Clone, PartialEq, Copy)]
+pub enum RuleLogic {
     #[serde(rename = "any")]
     Any,
     #[serde(rename = "all")]
@@ -60,8 +60,8 @@ pub enum RuleType {
 }
 
 impl Rule {
-    fn default_rule() -> RuleType {
-        RuleType::Any
+    fn default_rule() -> RuleLogic {
+        RuleLogic::Any
     }
 }
 

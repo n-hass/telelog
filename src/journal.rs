@@ -1,3 +1,6 @@
+use core::time;
+use std::collections::{BTreeMap, HashMap};
+
 use chrono::{DateTime,Local};
 use systemd::{journal, Journal};
 
@@ -12,24 +15,34 @@ pub fn open_journal_tail() -> Journal {
 	j
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LogEntry {
+	pub priority: u8,
 	pub timestamp: DateTime<Local>,
 	pub identifier: String,
 	pub message: String,
-	pub priority: u8,
+	raw_fields: BTreeMap<String, String>,
 }
 
 impl LogEntry {
-	pub fn get_copy(&self, field_string: &str) -> Result<String, String> {
+	pub fn new(priority: u8, timestamp: DateTime<Local>, identifier: String, message: String, raw_fields: BTreeMap<String, String>) -> Self {
+		LogEntry {
+			priority: priority,
+			timestamp: timestamp,
+			identifier: identifier,
+			message: message,
+			raw_fields: raw_fields,
+		}
+	}
+
+	pub fn get_field(&self, field_string: &str) -> Result<String, String> {
 		match field_string {
-			"timestamp" => Ok(self.timestamp.to_string()),
-			"identifier" => Ok(self.identifier.clone()),
-			"SYSLOG_IDENTIFIER" => Ok(self.identifier.clone()),
-			"message" => Ok(self.message.clone()),
-			"MESSAGE" => Ok(self.message.clone()),
-			"priority" => Ok(self.priority.to_string()),
-			_ => Err(format!("[LogEntry get] Field {} not found", field_string)),
+			"PRIORITY" => Ok(self.priority.to_string()),
+			"TIMESTAMP" => Ok(self.timestamp.to_string()),
+			"_SOURCE_REALTIME_TIMESTAMP" => Ok(self.timestamp.to_string()),
+			"IDENTIFIER" => Ok(self.identifier.to_owned()),
+			"MESSAGE" => Ok(self.message.to_owned()),
+			_ => self.raw_fields.get(field_string).map(|s| s.to_owned()).ok_or_else(|| format!("[LogEntry get] Field {} not found", field_string))
 		}
 	}
 }

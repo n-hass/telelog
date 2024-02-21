@@ -50,13 +50,11 @@ pub fn parse_message(entry: sysjournal::JournalRecord) -> Option<LogEntry> {
 		None => 7,
 	};
 
-	return Some(LogEntry {
-		timestamp: timestamp,
-		identifier: identifier,
-		message: message,
-		priority: priority,
-	});
-		
-		
-	
+	return Some(LogEntry::new(
+		priority,
+		timestamp,
+		identifier,
+		message,
+		entry,
+	));
 }

@@ -1,41 +1,47 @@
+use std::borrow::Borrow;
 use std::sync::OnceLock;
 
-use crate::config::{AppSettings, RuleType, RuleValue};
+use crate::config::{AppSettings, RuleLogic, RuleValue};
 use crate::journal::LogEntry;
 use systemd::Journal;
 use regex::Regex;
 
-static FILTERS: OnceLock<FilterSet> = OnceLock::new();
+static RULESET: OnceLock<RuleSet> = OnceLock::new();
 
 
 #[derive(Debug, PartialEq)]
-enum FilterAction {
+enum RuleAction {
 	Allow,
 	Deny,
 }
 
-#[derive(Debug)]
-struct FieldFilter {
+#[derive(Debug, Clone)]
+struct RuleField {
 	field: String,
 	re: Vec<Regex>,
-	logic: RuleType,
-	action: FilterAction,
-	priority: u32,
+	logic: RuleLogic,
 }
 
 #[derive(Debug)]
-struct FilterSet {
-	filters: Vec<FieldFilter>,
+struct RuleGroup {
+	priority: u32,
+	action: RuleAction,
+	rules: Vec<RuleField>,
 }
 
-impl FilterSet {
+#[derive(Debug)]
+struct RuleSet {
+	filters: Vec<RuleGroup>,
+}
+
+impl RuleSet {
 	pub fn new() -> Self {
-		FilterSet {
+		RuleSet {
 			filters: Vec::new(),
 		}
 	}
 
-	pub fn add(&mut self, filter: FieldFilter) {
+	pub fn add(&mut self, filter: RuleGroup) {
 		// when inserting must maintain priority order from lowest num to highest num
 		// if priority is the same, sory by filter.action. true (deny) should come before false (allow)
 
@@ -51,14 +57,14 @@ impl FilterSet {
 				break;
 			} else if priority == f.priority {
 				// if this filter is a deny filter, insert it before the other filters of the same priority
-				if filter.action == FilterAction::Deny {
+				if filter.action == RuleAction::Deny {
 					insert_index = i;
 					break;
 				}
 
 				// if this is an allow filter, find the next allow filter and insert before it
 				for (j, f) in self.filters.iter().enumerate().skip(i) {
-					if f.action == FilterAction::Allow || priority < f.priority { 
+					if f.action == RuleAction::Allow || priority < f.priority { 
 						insert_index = j;
 						break;
 					}
@@ -73,13 +79,13 @@ impl FilterSet {
 		self.filters.insert(insert_index, filter);
 	}
 
-	pub fn get(&self) -> &Vec<FieldFilter> {
+	pub fn get(&self) -> &Vec<RuleGroup> {
 		&self.filters
 	}
 }
 
 pub fn init(settings: &AppSettings, journal: &mut Journal) {
-	let mut temp_filters = FilterSet::new();
+	let mut partial_rule_set = RuleSet::new();
 
 	if let Some(rule_groups) = &settings.match_rules {
 		let mut group_iter = rule_groups.iter().peekable();
@@ -105,7 +111,7 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 							}
 
 							if values_iter.peek().is_some() {
-								if rule.logic == RuleType::All {
+								if rule.logic == RuleLogic::All {
 									match journal.match_and() {
 										Ok(_) => {},
 										Err(e) => println!("[filter init] Error adding match AND filter: {}", e)
@@ -142,30 +148,26 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 
 	if let Some(rule_groups) = &settings.deny_rules {
 		for (priority,rules) in rule_groups.iter() {
-			for rule in rules.iter() {
-
+			
+			let new_rule_list: Vec<RuleField> = rules.iter().filter_map(|rule| {
 				match &rule.value {
 					RuleValue::Single(value) => {
 						let re = Regex::new(value);
 						if re.is_err() {
 							println!("[filter init] Error compiling regex for '{}': {}", rule.field, re.err().unwrap());
-							continue;
+							return None;
 						}
 						let re = re.unwrap();
 
-						temp_filters.add(
-							FieldFilter {
-								field: rule.field.clone(),
-								re: vec![re],
-								logic: rule.logic.clone(),
-								action: FilterAction::Deny,
-								priority: *priority,
-							}
-						);
-
+						Some(RuleField {
+							field: rule.field.clone(),
+							re: vec![re],
+							logic: RuleLogic::Any, // single value rules dont really matter what the logical op is
+						})
 					},
 					RuleValue::Multiple(values) => {
-						let mut patterns = Vec::<Regex>::new();
+
+						let mut compiled_list = Vec::<Regex>::new();
 						for value in values.iter() {
 							let re = Regex::new(value);
 							if re.is_err() {
@@ -173,51 +175,48 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 								continue;
 							}
 							let re = re.unwrap();
-							patterns.push(re);
+							compiled_list.push(re);
 						}
-
-						temp_filters.add(
-							FieldFilter {
-								field: rule.field.clone(),
-								re: patterns,
-								logic: rule.logic.clone(),
-								action: FilterAction::Deny,
-								priority: *priority,
-							}
-						);
+						Some(RuleField {
+							field: rule.field.clone(),
+							re: compiled_list,
+							logic: rule.logic.clone(),
+						})
 					},
 				}
+			}).collect();
 
-			}
+			let new_rule_group = RuleGroup {
+				priority: *priority,
+				action: RuleAction::Deny,
+				rules: new_rule_list,
+			};
+			partial_rule_set.add(new_rule_group);
 		}
 	}
 
 	if let Some(rule_groups) = &settings.allow_rules {
 		for (priority,rules) in rule_groups.iter() {
-			for rule in rules.iter() {
-
+			
+			let new_rule_list: Vec<RuleField> = rules.iter().filter_map(|rule| {
 				match &rule.value {
 					RuleValue::Single(value) => {
 						let re = Regex::new(value);
 						if re.is_err() {
 							println!("[filter init] Error compiling regex for '{}': {}", rule.field, re.err().unwrap());
-							continue;
+							return None;
 						}
 						let re = re.unwrap();
 
-						temp_filters.add(
-							FieldFilter {
-								field: rule.field.clone(),
-								re: vec![re],
-								logic: rule.logic.clone(),
-								action: FilterAction::Allow,
-								priority: *priority,
-							}
-						);
-
+						Some(RuleField {
+							field: rule.field.clone(),
+							re: vec![re],
+							logic: RuleLogic::Any, // single value rules dont really matter what the logical op is
+						})
 					},
 					RuleValue::Multiple(values) => {
-						let mut patterns = Vec::<Regex>::new();
+
+						let mut compiled_list = Vec::<Regex>::new();
 						for value in values.iter() {
 							let re = Regex::new(value);
 							if re.is_err() {
@@ -225,31 +224,55 @@ pub fn init(settings: &AppSettings, journal: &mut Journal) {
 								continue;
 							}
 							let re = re.unwrap();
-							patterns.push(re);
+							compiled_list.push(re);
 						}
-
-						temp_filters.add(
-							FieldFilter {
-								field: rule.field.clone(),
-								re: patterns,
-								logic: rule.logic.clone(),
-								action: FilterAction::Allow,
-								priority: *priority,
-							}
-						);
+						Some(RuleField {
+							field: rule.field.clone(),
+							re: compiled_list,
+							logic: rule.logic.clone(),
+						})
 					},
 				}
+			}).collect();
 
-			}
+			let new_rule_group = RuleGroup {
+				priority: *priority,
+				action: RuleAction::Allow,
+				rules: new_rule_list,
+			};
+			partial_rule_set.add(new_rule_group);
 		}
 	}
 
-	FILTERS.set(temp_filters).expect("Initialisation occurs once");
+	RULESET.set(partial_rule_set).expect("Initialisation occurs once");
 }
 
 /// Returns true if a log should be filtered (ignored), returns false if it should be processed
 pub fn filter_log_entry(entry: &LogEntry) -> bool {
+	let rules: &Vec<RuleGroup> = RULESET.get().unwrap().filters.borrow();
 	
+	for rule_group in rules.iter() {
+		for rule in rule_group.rules.iter() {
+			let rule_field = rule.field.as_str();
+
+			for re in rule.re.iter() {
+				let log_field = match entry.get_field(rule_field) {
+					Ok(v) => v,
+					Err(e) => {
+						println!("[filter_log_entry] Error getting field {}: {}", rule_field, e);
+						continue;
+					},
+				};
+
+				if re.is_match(&log_field) {
+					match rule_group.action {
+						RuleAction::Allow => return false,
+						RuleAction::Deny => return true,
+					}
+				}
+			}
+		}
+	}
 	
 	false
 }
