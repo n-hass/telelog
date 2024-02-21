@@ -61,12 +61,13 @@ async fn main() {
 
 	let args = parse_cli_args();
 
+	println!("[telelog] Starting telelog v0.2.0");
+
 	let config_path = match args.get_one::<PathBuf>("config") {
 		Some(path) => path.to_str().unwrap(),
 		None => {
 			println!("[main] Config file not specified, using '/etc/telelog.toml'");
-			// "/etc/telelog.toml"
-			"./example/private.toml"
+			"/etc/telelog.toml"
 		},
 	};
 
