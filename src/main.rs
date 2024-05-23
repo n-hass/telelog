@@ -61,7 +61,7 @@ async fn main() {
 
 	let args = parse_cli_args();
 
-	println!("[telelog] Starting telelog v0.2.0");
+	println!("[telelog] Starting telelog v0.2.1");
 
 	let config_path = match args.get_one::<PathBuf>("config") {
 		Some(path) => path.to_str().unwrap(),

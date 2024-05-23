@@ -75,3 +75,21 @@ pub fn colour_translate(priority: u8) -> String {
 		_ => "❓".to_owned(),
 	}
 }
+
+pub fn escape_message(message: &str) -> String {
+	let mut message = message.to_string();
+	if message.starts_with("<code>") {
+		message = message.strip_prefix("<code>").unwrap_or("").to_string();
+	}
+
+	if message.ends_with("</code>") {
+		message = message.strip_suffix("</code>").unwrap_or("").to_string();
+	}
+
+	message
+		.replace("&", "&amp;")
+		.replace("<", "&lt;")
+		.replace(">", "&gt;")
+		.replace("\"", "&quot;")
+		.replace("'", "&#39;")
+}

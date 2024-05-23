@@ -189,6 +189,10 @@ async fn flush_log_buffer() {
 
 					failed_unsent_messages.push(message.to_string());
 				},
+				400 => {
+					println!("[telegram] API response 400. Escaping whole message for next flush... ");
+					failed_unsent_messages.push(escape_message(&message))
+				},
 				_ => {
 					println!("[telegram] API response {}: {:?}", status, text);
 					failed_unsent_messages.push(message.to_string());
